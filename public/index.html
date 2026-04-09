@@ -118,7 +118,7 @@ async function getAIResponse(questionNumber, userResponse) {
     priorResponses, // Array of { question, answer } from earlier steps
   };
 
-  const res = await fetch('/api/ai', {
+  const res = await fetch('https://ai-coaching-simulation-production.up.railway.app/api/ai', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
