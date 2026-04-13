@@ -1,6 +1,8 @@
 /**
  * AI Coaching Simulation — Backend Server
  * Express + Anthropic API
+ * Q1 + Q2: claude-haiku (fast, reliable)
+ * Q3: claude-sonnet (deeper, richer analysis)
  */
 
 const express = require("express");
@@ -8,13 +10,16 @@ const path = require("path");
 
 const app = express();
 app.use(express.json());
+
+// ── CORS ──────────────────────────────────────────────────────────────────────
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
+
 app.use(express.static(path.join(__dirname, "public")));
 
 // ── POST /api/ai ──────────────────────────────────────────────────────────────
@@ -24,6 +29,15 @@ app.post("/api/ai", async (req, res) => {
   if (!userResponse || !questionNumber) {
     return res.status(400).json({ error: "Missing required fields." });
   }
+
+  // Q1 + Q2 use Haiku (fast, high availability).
+  // Q3 uses Sonnet (richer, deeper coaching analysis).
+  const model =
+    questionNumber === 3
+      ? "claude-sonnet-4-20250514"
+      : "claude-haiku-4-5-20251001";
+
+  console.log(`Question ${questionNumber} — using model: ${model}`);
 
   // Build context string from prior responses
   const contextBlock =
@@ -87,8 +101,8 @@ ${
 Provide coaching feedback now.`;
 
   // ── Call Anthropic with retry on overload ────────────────────────────────
-  const MAX_RETRIES = 3;
-  const RETRY_DELAY_MS = 2000; // 2 seconds between retries
+  const MAX_RETRIES = 5;
+  const RETRY_DELAY_MS = 3000;
 
   const callAnthropic = async () => {
     return fetch("https://api.anthropic.com/v1/messages", {
@@ -99,7 +113,7 @@ Provide coaching feedback now.`;
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model,
         max_tokens: 1000,
         system: systemPrompt,
         messages: [{ role: "user", content: userMessage }],
@@ -110,8 +124,6 @@ Provide coaching feedback now.`;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   try {
-    let lastError = null;
-
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       const response = await callAnthropic();
 
@@ -135,7 +147,6 @@ Provide coaching feedback now.`;
         continue;
       }
 
-      // Non-retryable error or out of retries
       return res.status(502).json({ error: "Upstream API error." });
     }
   } catch (err) {
