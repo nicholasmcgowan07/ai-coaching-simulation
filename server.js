@@ -8,13 +8,6 @@ const path = require("path");
 
 const app = express();
 app.use(express.json());
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
-  next();
-});
 app.use(express.static(path.join(__dirname, "public")));
 
 // ── POST /api/ai ──────────────────────────────────────────────────────────────
@@ -86,9 +79,12 @@ ${
 
 Provide coaching feedback now.`;
 
-  // ── Call Anthropic ────────────────────────────────────────────────────────
-  try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+  // ── Call Anthropic with retry on overload ────────────────────────────────
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY_MS = 2000; // 2 seconds between retries
+
+  const callAnthropic = async () => {
+    return fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -102,20 +98,39 @@ Provide coaching feedback now.`;
         messages: [{ role: "user", content: userMessage }],
       }),
     });
+  };
 
-    if (!response.ok) {
-      const err = await response.text();
-      console.error("Anthropic API error:", err);
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  try {
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      const response = await callAnthropic();
+
+      if (response.ok) {
+        const data = await response.json();
+        const text = data.content
+          .filter((b) => b.type === "text")
+          .map((b) => b.text)
+          .join("\n");
+        return res.json({ feedback: text });
+      }
+
+      const errBody = await response.json().catch(() => ({}));
+      const isOverloaded = errBody?.error?.type === "overloaded_error";
+
+      console.error(`Anthropic API error (attempt ${attempt}):`, errBody);
+
+      if (isOverloaded && attempt < MAX_RETRIES) {
+        console.log(`Overloaded — retrying in ${RETRY_DELAY_MS}ms...`);
+        await sleep(RETRY_DELAY_MS);
+        continue;
+      }
+
+      // Non-retryable error or out of retries
       return res.status(502).json({ error: "Upstream API error." });
     }
-
-    const data = await response.json();
-    const text = data.content
-      .filter((b) => b.type === "text")
-      .map((b) => b.text)
-      .join("\n");
-
-    return res.json({ feedback: text });
   } catch (err) {
     console.error("Server error:", err);
     return res.status(500).json({ error: "Internal server error." });
